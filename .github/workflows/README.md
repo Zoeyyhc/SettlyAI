@@ -99,3 +99,5 @@
 2. **ECR登录失败**: 确认AWS_REGION和ECR_REPOSITORY_NAME正确
 3. **构建超时**: 检查Dockerfile是否优化，依赖是否过多
 4. **推送失败**: 确认ECR仓库存在且有推送权限 
+
+# edit iam role trust policy

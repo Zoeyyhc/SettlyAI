@@ -28,7 +28,7 @@ const ContextContainer = styled(Box)(({ theme }) => ({
 }));
 
 const SuburbReportPage = () => {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const TITLES = {
     incomeEmployment: 'Income & Employment',
     propertyMarketInsights: 'Property Market Insghts',

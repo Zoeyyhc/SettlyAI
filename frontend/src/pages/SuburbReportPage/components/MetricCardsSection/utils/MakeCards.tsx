@@ -22,7 +22,7 @@ const DemandAndDevCardsConfig: DemandCardConfig[] = [
 
 export function mapDevCardData(apiData: IDemandAndDev): IMetricCardData[] {
     return DemandAndDevCardsConfig.map(cfg => {
-        let value = apiData[cfg.key];
+        const value = apiData[cfg.key];
         if (cfg.key === "rentersRatio" || cfg.key === "demandSupplyRatio") {
             return {
                 icon: cfg.icon,

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   DOTNET_VERSION: '8.0.x'
   NODE_VERSION: '22.x'

@@ -8,7 +8,7 @@ on:
 
 env:
   DOTNET_VERSION: '8.0.x'
-  NODE_VERSION: '18.x'
+  NODE_VERSION: '22.x'
 
 jobs:
   frontend:
@@ -45,7 +45,7 @@ jobs:
             
       - name: Install dependencies
         working-directory: ./frontend
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
         
       - name: Build frontend
         working-directory: ./frontend

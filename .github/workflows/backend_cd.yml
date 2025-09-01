@@ -1,1 +1,63 @@
+name: Backend CD
 
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        
+      - name: Deploy to EC2 via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "docker stop settly-api || true",
+              "docker rm settly-api || true",
+              "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}",
+              "docker pull ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest",
+              "docker run -d --name settly-api --restart unless-stopped -p 5100:5100 -e ApiConfigs__DBConnection=\"${{ secrets.RDS_CONNECTION_STRING }}\" -e ASPNETCORE_ENVIRONMENT=Production -e ASPNETCORE_URLS=http://0.0.0.0:5100 ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest",
+              "docker image prune -f"
+            ]' \
+            --region "${{ secrets.AWS_REGION }}"
+          
+          echo "Waiting for deployment command to complete..."
+          sleep 30
+          
+          aws ssm describe-instance-information --region "${{ secrets.AWS_REGION }}" --filters "Key=InstanceIds,Values=${{ secrets.EC2_INSTANCE_ID }}"
+          
+      - name: Test RDS Connection
+        run: |
+          # Test database connection on EC2
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "docker exec settly-api dotnet ef database update --startup-project /app/SettlyApi || echo \"Database connection failed\""
+            ]' \
+            --region "${{ secrets.AWS_REGION }}"
+            

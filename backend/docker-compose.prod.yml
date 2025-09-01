@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  api:
+    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+    container_name: settly-api
+    restart: unless-stopped
+    ports:
+      - "5100:5100"
+    environment:
+      - ApiConfigs__DBConnection=${RDS_CONNECTION_STRING}
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://0.0.0.0:5100
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s 

@@ -45,7 +45,19 @@ jobs:
             ]' \
             --region "${{ secrets.AWS_REGION }}"
           
-          echo "等待部署命令执行完成..."
+          echo "Waiting for deployment command to complete..."
           sleep 30
           
           aws ssm describe-instance-information --region "${{ secrets.AWS_REGION }}" --filters "Key=InstanceIds,Values=${{ secrets.EC2_INSTANCE_ID }}"
+          
+      - name: Test RDS Connection
+        run: |
+          # Test database connection on EC2
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "docker exec settly-api dotnet ef database update --startup-project /app/SettlyApi || echo \"Database connection failed\""
+            ]' \
+            --region "${{ secrets.AWS_REGION }}"
+            

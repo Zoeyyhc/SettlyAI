@@ -7,6 +7,10 @@ on:
       - completed
     branches: [main]
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   DOTNET_VERSION: '8.0.x'
 
@@ -60,4 +64,9 @@ jobs:
               "docker exec settly-api dotnet ef database update --startup-project /app/SettlyApi || echo \"Database connection failed\""
             ]' \
             --region "${{ secrets.AWS_REGION }}"
+            
+      - name: Test AWS Connection
+        run: |
+          aws sts get-caller-identity
+          echo "AWS connection successful"
             

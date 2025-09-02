@@ -1,0 +1,68 @@
+name: Frontend CD
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+  S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CF_DIST_ID }}
+  BUILD_DIR: dist
+  NODE_VERSION: '22.x'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: cd-main
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }} }
+      - uses: pnpm/action-setup@v4
+        with: { version: '9', run_install: false }
+      - name: Get pnpm store directory
+        working-directory: ./frontend
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install deps
+        run: pnpm install
+        working-directory: frontend
+      - name: Build
+        run: pnpm build
+        working-directory: frontend
+      - name: Configure AWS (OIDC)
+        if: ${{ env.S3_BUCKET != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sync to S3
+        if: ${{ env.S3_BUCKET != '' }}
+        env: { BUILD_DIR: frontend/dist }
+        run: |
+          aws s3 sync "${BUILD_DIR}" "s3://${S3_BUCKET}/" \
+            --delete --exact-timestamps --only-show-errors \
+            --metadata-directive REPLACE --cache-control "max-age=300"
+      - name: Invalidate CloudFront
+        if: ${{ env.CLOUDFRONT_DISTRIBUTION_ID != '' }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/index.html" "/"

@@ -1,242 +1,271 @@
-# GitHub Actions CI/CD 配置说明
+# GitHub Actions CI/CD Configuration Guide
 
-## 概述
+## Overview
 
-这个项目包含完整的 CI/CD 流程，分为两个主要工作流：
+This project contains a complete CI/CD pipeline with three main workflows:
 
-### CI 流程 (持续集成)
-1. **前端构建** - 使用 pnpm 构建 React 应用
-2. **后端构建** - 编译 .NET 应用并构建 Docker 镜像
+### CI Process (Continuous Integration)
+1. **Frontend Build** - Build React application using pnpm
+2. **Backend Build** - Compile .NET application and build Docker image
 
-### CD 流程 (持续部署)
-1. **数据库检查** - 检测是否为首次部署
-2. **数据库初始化** - 首次部署时执行迁移和种子数据
-3. **应用部署** - 部署到 EC2 实例
-4. **数据库更新** - 后续部署时更新数据库架构
+### Backend CD Process (Continuous Deployment)
+1. **Database Check** - Detect if this is the first deployment
+2. **Database Initialization** - Execute migrations and seed data on first deployment
+3. **Application Deployment** - Deploy to EC2 instance
+4. **Database Update** - Update database schema on subsequent deployments
 
-## 工作流触发条件
+### Frontend CD Process (Frontend Continuous Deployment)
+1. **Frontend Build** - Build React application
+2. **S3 Sync** - Sync build artifacts to S3 bucket
+3. **CloudFront Cache Invalidation** - Refresh CDN cache
 
-- **CI**: 每次推送到任何分支时触发
-- **CD**: 仅在 CI 成功完成且推送到 `main` 分支时触发
+## Workflow Trigger Conditions
 
-## 需要配置的 GitHub Secrets
+- **CI**: Triggered on every push to any branch
+- **Backend CD**: Only triggered when CI succeeds and push is to `main` branch
+- **Frontend CD**: Only triggered when pushing to `main` branch and `frontend/` directory has changes
 
-### AWS 相关配置
+## Required GitHub Secrets Configuration
 
-在 GitHub 仓库的 Settings > Secrets and variables > Actions 中添加以下 secrets：
+### AWS Related Configuration
+
+Add the following secrets in GitHub repository Settings > Secrets and variables > Actions:
 
 #### 1. AWS_ROLE_ARN
-- **描述**: AWS IAM Role 的 ARN，用于 GitHub Actions 访问 AWS 服务
-- **格式**: `arn:aws:iam::123456789012:role/github-actions-role`
-- **权限要求**: 
-  - ECR: 镜像推送和拉取权限
-  - SSM: 执行命令权限
-  - STS: 身份验证权限
+- **Description**: AWS IAM Role ARN for GitHub Actions to access AWS services
+- **Format**: `arn:aws:iam::123456789012:role/github-actions-role`
+- **Permission Requirements**: 
+  - ECR: Image push and pull permissions
+  - SSM: Command execution permissions
+  - STS: Authentication permissions
+  - S3: Bucket read/write permissions
+  - CloudFront: Cache invalidation permissions
 
 #### 2. AWS_REGION
-- **描述**: AWS 区域
-- **示例**: `ap-southeast-1`, `us-east-1`
+- **Description**: AWS region
+- **Examples**: `ap-southeast-1`, `us-east-1`
 
 #### 3. ECR_REPOSITORY_NAME
-- **描述**: ECR 仓库名称
-- **示例**: `settly-backend`
+- **Description**: ECR repository name
+- **Example**: `settly-backend`
 
 #### 4. EC2_INSTANCE_ID
-- **描述**: 目标 EC2 实例 ID
-- **格式**: `i-1234567890abcdef0`
+- **Description**: Target EC2 instance ID
+- **Format**: `i-1234567890abcdef0`
 
 #### 5. RDS_CONNECTION_STRING
-- **描述**: PostgreSQL 数据库连接字符串
-- **格式**: `Host=your-rds-endpoint;Port=5432;Database=settly;User Id=username;Password=password;Include Error Detail=true`
+- **Description**: PostgreSQL database connection string
+- **Format**: `Host=your-rds-endpoint;Port=5432;Database=settly;User Id=username;Password=password;Include Error Detail=true`
 
-## IAM Role 配置
+#### 6. AWS_S3_BUCKET
+- **Description**: Frontend static files bucket name
+- **Example**: `settly-frontend-prod`
 
-### Trust Policy
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:your-org/your-repo:*"
-        }
-      }
-    }
-  ]
-}
-```
+#### 7. CF_DIST_ID
+- **Description**: CloudFront distribution ID
+- **Format**: `E1234567890ABC`
 
-### Permission Policy
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ecr:GetAuthorizationToken",
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:GetDownloadUrlForLayer",
-        "ecr:BatchGetImage",
-        "ecr:InitiateLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:CompleteLayerUpload",
-        "ecr:PutImage"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ssm:SendCommand",
-        "ssm:GetCommandInvocation",
-        "ssm:DescribeInstanceInformation"
-      ],
-      "Resource": [
-        "arn:aws:ec2:*:*:instance/i-*",
-        "arn:aws:ssm:*:*:document/AWS-RunShellScript"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sts:GetCallerIdentity"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
+## Detailed Workflow Process
 
-## 工作流程详解
+### CI Process
 
-### CI 流程
+#### 1. Frontend Job
+- Install Node.js 22.x
+- Setup pnpm 9
+- Install dependencies (with cache optimization)
+- Build application
 
-#### 1. 前端作业
-- 安装 Node.js 22.x
-- 设置 pnpm
-- 安装依赖
-- 构建应用
-- 缓存优化
+#### 2. Backend Job
+- Install .NET 8.0
+- Compile application
+- Configure AWS credentials
+- Login to ECR
+- Build Docker image
+- Push to ECR (including commit-hash and latest tags)
 
-#### 2. 后端作业
-- 安装 .NET 8.0
-- 编译应用
-- 配置 AWS 凭据
-- 登录 ECR
-- 构建 Docker 镜像
-- 推送到 ECR（包含 commit-hash 和 latest 标签）
+### CD Process
 
-#### 3. 安全扫描
-- 使用 Trivy 扫描代码
-- 上传结果到 GitHub Security tab
+#### 1. Database Check
+- Use `dotnet ef database update --dry-run` to check if database exists
+- Set `first_deployment` output variable
 
-### CD 流程
+#### 2. Database Initialization (First Deployment)
+- **Database Migration**: Create database structure
+- **Data Seeding**: Populate initial data
+- Execute using temporary container to avoid affecting main application
 
-#### 1. 数据库检查
-- 使用 `dotnet ef database update --dry-run` 检查数据库是否存在
-- 设置 `first_deployment` 输出变量
+#### 3. Application Deployment
+- Stop old container
+- Pull latest image
+- Start new container
+- Configure environment variables
 
-#### 2. 数据库初始化（首次部署）
-- **数据库迁移**: 创建数据库结构
-- **数据种子**: 填充初始数据
-- 使用临时容器执行，避免影响主应用
+#### 4. Database Update (Subsequent Deployments)
+- Update database schema within running container
+- Do not repeat data seeding
 
-#### 3. 应用部署
-- 停止旧容器
-- 拉取最新镜像
-- 启动新容器
-- 配置环境变量
+### Frontend CD Process
 
-#### 4. 数据库更新（后续部署）
-- 在运行中的容器内更新数据库架构
-- 不重复种子数据
+#### 1. Frontend Build
+- Install Node.js 22.x
+- Setup pnpm 9
+- Install dependencies (with cache optimization)
+- Build production version
 
-## 数据库管理策略
+#### 2. S3 Sync
+- Configure AWS credentials (OIDC)
+- Sync build artifacts to S3 bucket
+- Set appropriate cache control headers
+- Delete old files
 
-### 首次部署
+#### 3. CloudFront Cache Invalidation
+- Create cache invalidation request
+- Refresh cache for critical paths (`/index.html`, `/`)
+
+## Unified Technology Stack Versions
+
+To ensure consistency across all workflows, the project uses the following unified versions:
+
+- **Node.js**: 22.x
+- **pnpm**: 9
+- **pnpm action**: v4
+- **.NET**: 8.0.x
+
+## Caching Strategy
+
+### Frontend Caching
+- **pnpm store**: Cache based on `pnpm-lock.yaml` hash value
+- **Build artifacts**: CDN caching through S3 and CloudFront
+- **Cache control**: Static resources set to 5-minute cache, HTML files invalidated immediately
+
+### Backend Caching
+- **Docker layers**: Utilize Docker layer caching to optimize build speed
+- **Dependency caching**: .NET package caching
+
+## Database Management Strategy
+
+### First Deployment
 ```bash
-# 1. 数据库迁移
+# 1. Database migration
 docker run --rm -e ApiConfigs__DBConnection="..." image:latest \
   dotnet ef database update --startup-project /app/SettlyApi --project /app/SettlyModels
 
-# 2. 数据种子
+# 2. Data seeding
 docker run --rm -e ApiConfigs__DBConnection="..." image:latest \
   bash -c "cd /app/SettlyDbManager && dotnet run -- --seed"
 ```
 
-### 后续部署
+### Subsequent Deployments
 ```bash
-# 在运行中的容器内更新架构
+# Update schema within running container
 docker exec settly-api dotnet ef database update --startup-project /app/SettlyApi --project /app/SettlyModels
 ```
 
-## 镜像标签策略
+## Image Tagging Strategy
 
-- **commit-hash**: 每次提交的唯一标识，如 `abc1234`
-- **latest**: 最新版本标签
+- **commit-hash**: Unique identifier for each commit, e.g., `abc1234`
+- **latest**: Latest version tag
 
-## 环境要求
+## Environment Requirements
 
-### EC2 实例
-- 安装 Docker
-- 安装 AWS CLI
-- 配置 SSM Agent
-- 配置适当的 IAM 角色
+### EC2 Instance
+- Install Docker
+- Install AWS CLI
+- Configure SSM Agent
+- Configure appropriate IAM role
 
-### RDS 数据库
-- PostgreSQL 实例
-- 配置安全组允许 EC2 访问
-- 创建数据库和用户
+### RDS Database
+- PostgreSQL instance
+- Configure security groups to allow EC2 access
+- Create database and user
 
-## 故障排除
+### S3 and CloudFront
+- S3 bucket configured for static website hosting
+- CloudFront distribution configured to point to S3 bucket
+- Appropriate CORS and caching policies
 
-### 常见问题
+## Troubleshooting
 
-#### CI 相关问题
-1. **AWS 权限错误**: 检查 IAM Role 权限是否完整
-2. **ECR 登录失败**: 确认 AWS_REGION 和 ECR_REPOSITORY_NAME 正确
-3. **构建超时**: 检查 Dockerfile 是否优化，依赖是否过多
-4. **推送失败**: 确认 ECR 仓库存在且有推送权限
+### Common Issues
 
-#### CD 相关问题
-1. **SSM 命令失败**: 检查 EC2 实例是否安装了 SSM Agent
-2. **数据库连接失败**: 验证 RDS_CONNECTION_STRING 格式和网络连接
-3. **迁移失败**: 检查数据库权限和迁移文件
-4. **容器启动失败**: 检查环境变量和端口配置
+#### CI Related Issues
+1. **AWS Permission Errors**: Check if IAM Role permissions are complete
+2. **ECR Login Failure**: Confirm AWS_REGION and ECR_REPOSITORY_NAME are correct
+3. **Build Timeout**: Check if Dockerfile is optimized and dependencies are not excessive
+4. **Push Failure**: Confirm ECR repository exists and has push permissions
 
-### 调试步骤
+#### CD Related Issues
+1. **SSM Command Failure**: Check if EC2 instance has SSM Agent installed
+2. **Database Connection Failure**: Verify RDS_CONNECTION_STRING format and network connectivity
+3. **Migration Failure**: Check database permissions and migration files
+4. **Container Startup Failure**: Check environment variables and port configuration
 
-1. **检查 SSM 命令执行**:
+#### Frontend CD Related Issues
+1. **S3 Sync Failure**: Check AWS_S3_BUCKET and IAM permissions
+2. **CloudFront Invalidation Failure**: Confirm CF_DIST_ID is correct
+3. **Build Failure**: Check frontend dependencies and build scripts
+4. **Cache Issues**: Verify CloudFront configuration and caching policies
+
+### Debugging Steps
+
+1. **Check SSM Command Execution**:
    ```bash
    aws ssm describe-instance-information --region your-region
    ```
 
-2. **查看容器日志**:
+2. **View Container Logs**:
    ```bash
    docker logs settly-api
    ```
 
-3. **验证数据库连接**:
+3. **Verify Database Connection**:
    ```bash
    docker exec settly-api dotnet ef database update --dry-run
    ```
 
-## 最佳实践
+4. **Check S3 Sync Status**:
+   ```bash
+   aws s3 ls s3://your-bucket-name --recursive
+   ```
 
-1. **权限最小化**: IAM Role 只包含必要的权限
-2. **缓存优化**: 使用 pnpm store 缓存加速依赖安装
-3. **多阶段构建**: Dockerfile 使用多阶段构建减小镜像大小
-4. **生产环境**: 运行时使用 ASP.NET Core 运行时镜像，不包含 SDK
-5. **数据库管理**: 智能区分首次部署和后续部署
-6. **错误处理**: 包含适当的等待时间和结果检查
-7. **日志记录**: 详细的执行日志便于调试
+5. **Verify CloudFront Distribution**:
+   ```bash
+   aws cloudfront get-distribution --id YOUR_DISTRIBUTION_ID
+   ```
+
+## Workflow Dependencies
+
+```mermaid
+graph TD
+    A[Code Push] --> B{Branch Check}
+    B -->|main branch| C[CI Process]
+    B -->|other branches| D[CI Process Only]
+    
+    C --> E[Frontend Build]
+    C --> F[Backend Build]
+    
+    E --> G{CI Success?}
+    F --> G
+    
+    G -->|Yes| H[CD Process]
+    G -->|No| I[Process End]
+    
+    H --> J[Database Check]
+    J --> K[Application Deployment]
+    
+    A --> L{frontend/ directory changes?}
+    L -->|Yes| M[Frontend CD Process]
+    L -->|No| N[Skip Frontend Deployment]
+    
+    M --> O[Frontend Build]
+    O --> P[S3 Sync]
+    P --> Q[CloudFront Invalidation]
+```
+
+## Best Practices
+
+1. **Version Consistency**: Ensure all workflows use the same tool versions
+2. **Cache Optimization**: Make full use of GitHub Actions and AWS caching mechanisms
+3. **Minimal Permissions**: Configure minimum necessary permissions for each workflow
+4. **Error Handling**: Configure appropriate error handling and retry mechanisms
+5. **Monitoring Alerts**: Set up notification mechanisms for workflow failures

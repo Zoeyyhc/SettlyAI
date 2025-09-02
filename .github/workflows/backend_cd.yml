@@ -34,6 +34,98 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
         
+      - name: Check if database exists (first-time deployment check)
+        id: db-check
+        run: |
+          echo "Checking if database exists..."
+          DB_EXISTS=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}",
+              "docker pull ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest",
+              "docker run --rm -e ApiConfigs__DBConnection=\"${{ secrets.RDS_CONNECTION_STRING }}\" ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest dotnet ef database update --dry-run --startup-project /app/SettlyApi --project /app/SettlyModels > /tmp/db_check.log 2>&1 && echo \"DB_EXISTS=true\" || echo \"DB_EXISTS=false\""
+            ]' \
+            --query "Command.CommandId" --output text --region "${{ secrets.AWS_REGION }}")
+          
+          echo "Database check command ID: $DB_EXISTS"
+          echo "Waiting for database check to complete..."
+          sleep 20
+          
+          # Get the command result
+          DB_RESULT=$(aws ssm get-command-invocation \
+            --command-id "$DB_EXISTS" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "StandardOutputContent" --output text --region "${{ secrets.AWS_REGION }}")
+          
+          echo "Database check result: $DB_RESULT"
+          
+          if [[ "$DB_RESULT" == *"DB_EXISTS=false"* ]]; then
+            echo "first_deployment=true" >> $GITHUB_OUTPUT
+            echo "This is a first-time deployment - database initialization required"
+          else
+            echo "first_deployment=false" >> $GITHUB_OUTPUT
+            echo "Database exists - skipping initialization"
+          fi
+          
+      - name: Initialize database (first time only)
+        if: steps.db-check.outputs.first_deployment == 'true'
+        run: |
+          echo "Initializing database for first-time deployment..."
+          
+          # Run database migration
+          echo "Running database migrations..."
+          MIGRATE_CMD=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "docker run --rm \
+                -e ApiConfigs__DBConnection=\"${{ secrets.RDS_CONNECTION_STRING }}\" \
+                -e ASPNETCORE_ENVIRONMENT=Production \
+                ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest \
+                dotnet ef database update --startup-project /app/SettlyApi --project /app/SettlyModels"
+            ]' \
+            --query "Command.CommandId" --output text --region "${{ secrets.AWS_REGION }}")
+          
+          echo "Migration command ID: $MIGRATE_CMD"
+          echo "Waiting for migration to complete..."
+          sleep 30
+          
+          # Check migration result
+          MIGRATE_RESULT=$(aws ssm get-command-invocation \
+            --command-id "$MIGRATE_CMD" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "StandardOutputContent" --output text --region "${{ secrets.AWS_REGION }}")
+          
+          echo "Migration result: $MIGRATE_RESULT"
+          
+          # Run database seeding
+          echo "Seeding database with initial data..."
+          SEED_CMD=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "docker run --rm \
+                -e ApiConfigs__DBConnection=\"${{ secrets.RDS_CONNECTION_STRING }}\" \
+                -e ASPNETCORE_ENVIRONMENT=Production \
+                ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest \
+                bash -c \"cd /app/SettlyDbManager && dotnet run -- --seed\""
+            ]' \
+            --query "Command.CommandId" --output text --region "${{ secrets.AWS_REGION }}")
+          
+          echo "Seed command ID: $SEED_CMD"
+          echo "Waiting for seeding to complete..."
+          sleep 30
+          
+          # Check seeding result
+          SEED_RESULT=$(aws ssm get-command-invocation \
+            --command-id "$SEED_CMD" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "StandardOutputContent" --output text --region "${{ secrets.AWS_REGION }}")
+          
+          echo "Seeding result: $SEED_RESULT"
+          echo "Database initialization completed successfully!"
+          
       - name: Deploy to EC2 via SSM
         run: |
           aws ssm send-command \
@@ -54,14 +146,15 @@ jobs:
           
           aws ssm describe-instance-information --region "${{ secrets.AWS_REGION }}" --filters "Key=InstanceIds,Values=${{ secrets.EC2_INSTANCE_ID }}"
           
-      - name: Test RDS Connection
+      - name: Update database schema (for existing deployments)
+        if: steps.db-check.outputs.first_deployment == 'false'
         run: |
-          # Test database connection on EC2
+          echo "Updating database schema for existing deployment..."
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "docker exec settly-api dotnet ef database update --startup-project /app/SettlyApi || echo \"Database connection failed\""
+              "docker exec settly-api dotnet ef database update --startup-project /app/SettlyApi --project /app/SettlyModels"
             ]' \
             --region "${{ secrets.AWS_REGION }}"
             
@@ -69,4 +162,3 @@ jobs:
         run: |
           aws sts get-caller-identity
           echo "AWS connection successful"
-            

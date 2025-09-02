@@ -54,17 +54,6 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         run: pnpm build
-        
-      # - name: Run frontend tests
-      #   working-directory: ./frontend
-      #   run: pnpm test --if-present
-        
-      # - name: Upload frontend build artifacts
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: frontend-build
-      #     path: frontend/dist
-      #     retention-days: 7
 
   backend:
     name: Backend Build & Test

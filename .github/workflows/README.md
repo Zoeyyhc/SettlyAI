@@ -49,73 +49,6 @@
 - **描述**: PostgreSQL 数据库连接字符串
 - **格式**: `Host=your-rds-endpoint;Port=5432;Database=settly;User Id=username;Password=password;Include Error Detail=true`
 
-## IAM Role 配置
-
-### Trust Policy
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:your-org/your-repo:*"
-        }
-      }
-    }
-  ]
-}
-```
-
-### Permission Policy
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ecr:GetAuthorizationToken",
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:GetDownloadUrlForLayer",
-        "ecr:BatchGetImage",
-        "ecr:InitiateLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:CompleteLayerUpload",
-        "ecr:PutImage"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ssm:SendCommand",
-        "ssm:GetCommandInvocation",
-        "ssm:DescribeInstanceInformation"
-      ],
-      "Resource": [
-        "arn:aws:ec2:*:*:instance/i-*",
-        "arn:aws:ssm:*:*:document/AWS-RunShellScript"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sts:GetCallerIdentity"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
 
 ## 工作流程详解
 
@@ -136,9 +69,6 @@
 - 构建 Docker 镜像
 - 推送到 ECR（包含 commit-hash 和 latest 标签）
 
-#### 3. 安全扫描
-- 使用 Trivy 扫描代码
-- 上传结果到 GitHub Security tab
 
 ### CD 流程
 
@@ -231,12 +161,3 @@ docker exec settly-api dotnet ef database update --startup-project /app/SettlyAp
    docker exec settly-api dotnet ef database update --dry-run
    ```
 
-## 最佳实践
-
-1. **权限最小化**: IAM Role 只包含必要的权限
-2. **缓存优化**: 使用 pnpm store 缓存加速依赖安装
-3. **多阶段构建**: Dockerfile 使用多阶段构建减小镜像大小
-4. **生产环境**: 运行时使用 ASP.NET Core 运行时镜像，不包含 SDK
-5. **数据库管理**: 智能区分首次部署和后续部署
-6. **错误处理**: 包含适当的等待时间和结果检查
-7. **日志记录**: 详细的执行日志便于调试

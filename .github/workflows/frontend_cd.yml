@@ -28,9 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: ${{ env.NODE_VERSION }} }
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: pnpm/action-setup@v4
-        with: { version: '9', run_install: false }
+        with:
+          version: '9'
+          run_install: false
       - name: Get pnpm store directory
         working-directory: ./frontend
         shell: bash
@@ -57,7 +60,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Sync to S3
         if: ${{ env.S3_BUCKET != '' }}
-        env: { BUILD_DIR: frontend/dist }
+        env:
+          BUILD_DIR: frontend/dist
         run: |
           aws s3 sync "${BUILD_DIR}" "s3://${S3_BUCKET}/" \
             --delete --exact-timestamps --only-show-errors \
